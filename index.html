@@ -406,24 +406,33 @@
                     } else {
                         document.getElementById(key === '15' ? 'noDebts15' : 'noDebts30').classList.add('hidden');
                         groups[key].forEach((debt, index) => {
-                            const dueClass = getDueColor(debt.dueDate);
-                            let dueDateCellClass = '';
+                            // Calculate days until due date
                             const today = new Date();
                             today.setHours(0,0,0,0);
                             const dueD = new Date(debt.dueDate);
                             dueD.setHours(0,0,0,0);
-                            const diff = (dueD - today) / (1000 * 60 * 60 * 24);
+                            const diff = Math.round((dueD - today) / (1000 * 60 * 60 * 24));
+
+                            // Set cell color: red on due date, yellow for 1-3 days before
+                            let dueDateCellClass = '';
+                            let dueTooltip = '';
                             if (diff === 0) {
                                 dueDateCellClass = 'bg-red-500 text-white font-bold';
+                                dueTooltip = 'Due today!';
                             } else if (diff > 0 && diff <= 3) {
                                 dueDateCellClass = 'bg-yellow-300 text-gray-900 font-bold';
+                                dueTooltip = `${diff} day${diff === 1 ? '' : 's'} left`;
+                            } else if (diff < 0) {
+                                dueDateCellClass = 'bg-gray-300 text-gray-700 font-bold';
+                                dueTooltip = `${-diff} day${diff === -1 ? '' : 's'} overdue`;
                             }
+
                             const row = document.createElement('tr');
-                            row.className = `hover:bg-gray-50 dark:hover:bg-gray-700 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700'} ${dueClass}`;
+                            row.className = `hover:bg-gray-50 dark:hover:bg-gray-700 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700'}`;
                             row.innerHTML = `
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.lender}</td>
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${formatDate(debt.borrowDate)}</td>
-                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap font-medium ${dueDateCellClass}">${formatDate(debt.dueDate)}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap font-medium ${dueDateCellClass}" title="${dueTooltip}">${formatDate(debt.dueDate)}</td>
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.amountBorrowed}</td>
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.monthlyInterest}</td>
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.term}</td>
