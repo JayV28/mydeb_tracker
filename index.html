@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debt Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: '#3B82F6',
+              secondary: '#10B981',
+              danger: '#EF4444',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      .due-soon { background-color: #FEF3C7; }
+      .due-overdue { background-color: #FEE2E2; }
+      .due-ok { background-color: #D1FAE5; }
+      .table-container { max-height: 400px; overflow-y: auto; }
+      .sticky-header th {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: #f3f4f6;
+      }
+      .dark .sticky-header th {
+        background: #374151;
+      }
+      #editModal, #calculatorModal, #driveLinkModal {
+        z-index: 1001 !important;
+      }
+      #loadingSpinner {
+        display: none;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
+      /* Ensure modal is visible when not hidden */
+      #driveLinkModal:not(.hidden) {
+        display: flex !important;
+      }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 font-sans transition-colors duration-300 min-h-screen">
+    <div class="container mx-auto p-4 sm:p-6 max-w-7xl relative">
+        <!-- Toast Notification -->
+        <div id="toast" class="fixed left-1/2 -translate-x-1/2 top-6 z-[2000] bg-primary text-white px-6 py-3 rounded-lg shadow-lg opacity-0 pointer-events-none transition-all duration-500"></div>
+
+        <!-- Loading Spinner -->
+        <div id="loadingSpinner" class="text-gray-600 dark:text-gray-300">
+            <svg class="animate-spin h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+
+        <!-- Header Section -->
+        <header class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-gray-100">Debt Tracker</h1>
+            <div class="flex items-center gap-2">
+                <input type="text" id="searchInput" placeholder="Search by lender..." class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-800 dark:text-gray-100">
+                <button id="resetAllDebts" class="bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300 px-3 py-2 rounded-lg shadow hover:bg-red-200 dark:hover:bg-red-800 transition-colors" aria-label="Reset all debts">Reset</button>
+                <button id="toggleDark" class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 px-3 py-2 rounded-lg shadow hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" aria-label="Toggle dark mode">
+                    <span id="darkIcon">🌙</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Summary -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 text-center transform hover:scale-105 transition-transform">
+                <div class="text-sm text-gray-500 dark:text-gray-400">Total Debts</div>
+                <div class="text-2xl font-bold text-gray-800 dark:text-gray-100" id="dashboardTotalDebts">0</div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 text-center transform hover:scale-105 transition-transform">
+                <div class="text-sm text-gray-500 dark:text-gray-400">Total Monthly Payment</div>
+                <div class="text-2xl font-bold text-gray-800 dark:text-gray-100" id="dashboardTotalMonthly">₱0.00</div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 text-center transform hover:scale-105 transition-transform">
+                <div class="text-sm text-gray-500 dark:text-gray-400">Overall Total Remaining</div>
+                <div class="text-2xl font-bold text-gray-800 dark:text-gray-100" id="dashboardOverallRemaining">₱0.00</div>
+            </div>
+        </div>
+
+        <!-- Form to Add Debt -->
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg mb-8 border border-gray-200 dark:border-gray-700">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-100">Add New Debt</h2>
+            <form id="debtForm" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label for="lender" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Lender (App Name)</label>
+                    <input type="text" id="lender" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                </div>
+                <div>
+                    <label for="borrowDate" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Borrow Date</label>
+                    <input type="date" id="borrowDate" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                </div>
+                <div>
+                    <label for="dueDate" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Initial Due Date</label>
+                    <input type="date" id="dueDate" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                </div>
+                <div>
+                    <label for="amountBorrowed" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Amount Borrowed (₱)</label>
+                    <input type="number" id="amountBorrowed" step="0.01" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                </div>
+                <div>
+                    <label for="term" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Number of Months (Term)</label>
+                    <input type="number" id="term" min="1" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                </div>
+                <div>
+                    <label for="monthlyPayment" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Amount per Month (₱)</label>
+                    <input type="number" id="monthlyPayment" step="0.01" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                </div>
+                <div>
+                    <label for="paymentDay" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Payment Day</label>
+                    <select id="paymentDay" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                        <option value="15">15th</option>
+                        <option value="30">30th</option>
+                    </select>
+                </div>
+                <div class="sm:col-span-2">
+                    <label for="remarks" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Remarks</label>
+                    <input type="text" id="remarks" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900">
+                </div>
+                <div class="sm:col-span-2 flex justify-between items-center">
+                    <div class="flex space-x-2">
+                        <button type="submit" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">Add Debt</button>
+                        <button type="button" id="exportData" class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">Export</button>
+                        <label for="importData" class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors cursor-pointer">Import</label>
+                        <input type="file" id="importData" accept=".json" class="hidden">
+                        <button type="button" id="openDriveLinkModal" class="bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition-colors">Load from Google Drive</button>
+                    </div>
+                    <button type="button" id="openCalculator" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors">Calculator</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Google Drive Link Modal -->
+        <div id="driveLinkModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-100">Load JSON from Google Drive or GitHub</h2>
+                <form id="driveLinkForm" class="space-y-4">
+                    <div>
+                        <label for="driveLinkInput" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Google Drive or GitHub Raw URL</label>
+                        <input type="text" id="driveLinkInput" placeholder="Paste Google Drive sharing link or GitHub raw URL..." class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">For Google Drive, use a sharing link (e.g., https://drive.google.com/file/d/FILE_ID/view) and ensure 'Anyone with the link' access. For GitHub, use the raw URL (e.g., https://raw.githubusercontent.com/username/repo/main/debts.json).</p>
+                    </div>
+                    <div class="flex justify-end space-x-2">
+                        <button type="button" id="cancelDriveLink" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors">Cancel</button>
+                        <button type="submit" class="bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition-colors">Load</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Calculator Modal -->
+        <div id="calculatorModal" class="hidden fixed bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700" style="width: 90vw; max-width: 320px; z-index: 1000;">
+            <div id="calculatorHeader" class="flex justify-between items-center mb-3 cursor-move">
+                <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-100">Calculator</h3>
+                <button id="closeCalculator" class="text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-100 text-xl">&times;</button>
+            </div>
+            <input id="calculatorDisplay" type="text" class="w-full p-2 mb-3 border border-gray-300 dark:border-gray-600 rounded-lg text-right bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100" readonly>
+            <div class="grid grid-cols-4 gap-2">
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="7">7</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="8">8</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="9">9</button>
+                <button class="calc-btn bg-primary text-white p-2 rounded-lg hover:bg-blue-600 transition-colors" data-value="/">/</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="4">4</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="5">5</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="6">6</button>
+                <button class="calc-btn bg-primary text-white p-2 rounded-lg hover:bg-blue-600 transition-colors" data-value="*">×</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="1">1</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="2">2</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="3">3</button>
+                <button class="calc-btn bg-primary text-white p-2 rounded-lg hover:bg-blue-600 transition-colors" data-value="-">-</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value="0">0</button>
+                <button class="calc-btn bg-gray-200 dark:bg-gray-700 p-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" data-value=".">.</button>
+                <button class="calc-btn bg-danger text-white p-2 rounded-lg hover:bg-red-600 transition-colors" data-value="clear">C</button>
+                <button class="calc-btn bg-primary text-white p-2 rounded-lg hover:bg-blue-600 transition-colors" data-value="+">+</button>
+                <button class="calc-btn bg-danger text-white p-2 rounded-lg hover:bg-red-600 transition-colors col-span-2" data-value="del">Del</button>
+                <button class="calc-btn bg-secondary text-white p-2 rounded-lg hover:bg-green-600 transition-colors col-span-2" data-value="=">=</button>
+            </div>
+        </div>
+
+        <!-- Edit Modal -->
+        <div id="editModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-lg border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-100">Edit Debt</h2>
+                <form id="editForm" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <input type="hidden" id="editId">
+                    <div>
+                        <label for="editLender" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Lender (App Name)</label>
+                        <input type="text" id="editLender" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                    </div>
+                    <div>
+                        <label for="editBorrowDate" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Borrow Date</label>
+                        <input type="date" id="editBorrowDate" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                    </div>
+                    <div>
+                        <label for="editDueDate" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Due Date</label>
+                        <input type="date" id="editDueDate" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                    </div>
+                    <div>
+                        <label for="editAmountBorrowed" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Amount Borrowed (₱)</label>
+                        <input type="number" id="editAmountBorrowed" step="0.01" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                    </div>
+                    <div>
+                        <label for="editTerm" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Number of Months (Term)</label>
+                        <input type="number" id="editTerm" min="1" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                    </div>
+                    <div>
+                        <label for="editMonthlyPayment" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Amount per Month (₱)</label>
+                        <input type="number" id="editMonthlyPayment" step="0.01" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                    </div>
+                    <div>
+                        <label for="editPaymentDay" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Payment Day</label>
+                        <select id="editPaymentDay" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900" required>
+                            <option value="15">15th</option>
+                            <option value="30">30th</option>
+                        </select>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label for="editRemarks" class="block text-sm font-medium text-gray-600 dark:text-gray-300">Remarks</label>
+                        <input type="text" id="editRemarks" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-900">
+                    </div>
+                    <div class="sm:col-span-2 flex justify-end space-x-2">
+                        <button type="button" id="cancelEdit" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors">Cancel</button>
+                        <button type="submit" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Debt Groups -->
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-2">
+                <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-100">Debt List</h2>
+                <div class="flex items-center gap-2">
+                    <label for="lenderFilter" class="text-sm text-gray-600 dark:text-gray-300">Filter by Lender:</label>
+                    <select id="lenderFilter" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-800 dark:text-gray-100">
+                        <option value="">All</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="group15" class="mb-8">
+                <h3 class="text-lg font-medium mb-2 text-gray-700 dark:text-gray-100">15th of the Month</h3>
+                <div class="table-container">
+                    <table class="w-full border-collapse border border-gray-200 dark:border-gray-700">
+                        <thead class="bg-gray-100 dark:bg-gray-700 sticky-header">
+                            <tr>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Lender</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Borrow Date</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Due Date</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Amount Borrowed (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Monthly Interest (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Term</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Remaining Months</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Monthly Payment (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Total Remaining (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Remarks</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table15"></tbody>
+                    <tr id="noDebts15" class="hidden"><td colspan="11" class="text-center text-gray-400 dark:text-gray-500 py-6">No debts found for 15th.</td></tr>
+                    </table>
+                </div>
+                <p class="mt-4 text-gray-600 dark:text-gray-300 font-semibold">Total Remaining (15th): ₱<span id="totalRemaining15">0.00</span></p>
+                <p class="mb-4 text-gray-600 dark:text-gray-300 font-semibold">Total Monthly Payment (15th): ₱<span id="totalMonthlyPayment15">0.00</span></p>
+            </div>
+
+            <div id="group30" class="mb-8">
+                <h3 class="text-lg font-medium mb-2 text-gray-700 dark:text-gray-100">30th of the Month</h3>
+                <div class="table-container">
+                    <table class="w-full border-collapse border border-gray-200 dark:border-gray-700">
+                        <thead class="bg-gray-100 dark:bg-gray-700 sticky-header">
+                            <tr>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Lender</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Borrow Date</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Due Date</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Amount Borrowed (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Monthly Interest (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Term</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Remaining Months</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Monthly Payment (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Total Remaining (₱)</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Remarks</th>
+                                <th class="p-3 text-left font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table30"></tbody>
+                    <tr id="noDebts30" class="hidden"><td colspan="11" class="text-center text-gray-400 dark:text-gray-500 py-6">No debts found for 30th.</td></tr>
+                    </table>
+                </div>
+                <p class="mt-4 text-gray-600 dark:text-gray-300 font-semibold">Total Remaining (30th): ₱<span id="totalRemaining30">0.00</span></p>
+                <p class="mb-4 text-gray-600 dark:text-gray-300 font-semibold">Total Monthly Payment (30th): ₱<span id="totalMonthlyPayment30">0.00</span></p>
+            </div>
+
+            <div class="mt-4">
+                <p class="text-gray-600 dark:text-gray-300 font-semibold">Overall Total Remaining: ₱<span id="overallTotalRemaining">0.00</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            let debts = JSON.parse(localStorage.getItem('debts')) || [];
+            let lastPaidState = null;
+            let undoTimeout = null;
+
+            function formatDate(dateStr) {
+                const date = new Date(dateStr);
+                return new Intl.DateTimeFormat('en-US', {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric'
+                }).format(date);
+            }
+
+            function calculateMonthsBetween(borrowDate, currentDate, paymentDay) {
+                const borrow = new Date(borrowDate);
+                const current = new Date(currentDate);
+                const borrowDay = parseInt(paymentDay);
+                let months = (current.getFullYear() - borrow.getFullYear()) * 12 + (current.getMonth() - borrow.getMonth());
+                if (current.getDate() < borrowDay) {
+                    months--;
+                }
+                return months < 0 ? 0 : months;
+            }
+
+            function calculateMonthlyInterest(amountBorrowed, monthlyPayment, term) {
+                const totalPayment = monthlyPayment * term;
+                const totalInterest = totalPayment - amountBorrowed;
+                return (totalInterest / term).toFixed(2);
+            }
+
+            function getDueColor(due) {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const dueD = new Date(due);
+                dueD.setHours(0, 0, 0, 0);
+                const diff = (dueD - today) / (1000 * 60 * 60 * 24);
+                if (diff <= 0) return 'due-overdue';
+                if (diff <= 3) return 'due-soon';
+                return 'due-ok';
+            }
+
+            function showToast(message) {
+                const toast = document.getElementById('toast');
+                toast.textContent = message;
+                toast.classList.remove('opacity-0', 'pointer-events-none');
+                toast.classList.add('opacity-100', 'pointer-events-auto');
+                setTimeout(() => {
+                    toast.classList.remove('opacity-100', 'pointer-events-auto');
+                    toast.classList.add('opacity-0', 'pointer-events-none');
+                }, 3000);
+            }
+
+            function updateDashboard() {
+                document.getElementById('dashboardTotalDebts').textContent = debts.length;
+                const totalMonthly = debts.reduce((sum, d) => sum + parseFloat(d.monthlyPayment), 0).toFixed(2);
+                document.getElementById('dashboardTotalMonthly').textContent = `₱${totalMonthly}`;
+                const overall = debts.reduce((sum, d) => sum + parseFloat(d.totalRemaining), 0).toFixed(2);
+                document.getElementById('dashboardOverallRemaining').textContent = `₱${overall}`;
+            }
+
+            function updateTables(filter = '') {
+                const table15 = document.getElementById('table15');
+                const table30 = document.getElementById('table30');
+                table15.innerHTML = '';
+                table30.innerHTML = '';
+
+                let filteredDebts = debts;
+                if (filter) {
+                    filteredDebts = filteredDebts.filter(debt => debt.lender.toLowerCase().includes(filter.toLowerCase()));
+                }
+                const lenderFilter = document.getElementById('lenderFilter').value;
+                if (lenderFilter) {
+                    filteredDebts = filteredDebts.filter(debt => debt.lender === lenderFilter);
+                }
+
+                const select = document.getElementById('lenderFilter');
+                const lenders = Array.from(new Set(debts.map(d => d.lender))).sort();
+                const current = select.value;
+                select.innerHTML = '<option value="">All</option>' + lenders.map(l => `<option value="${l}">${l}</option>`).join('');
+                select.value = current;
+
+                const groups = { '15': [], '30': [] };
+                filteredDebts.forEach(debt => {
+                    if (groups[debt.paymentDay]) groups[debt.paymentDay].push(debt);
+                });
+
+                Object.keys(groups).forEach(key => {
+                    const tableBody = key === '15' ? table15 : table30;
+                    tableBody.innerHTML = '';
+                    if (groups[key].length === 0) {
+                        document.getElementById(key === '15' ? 'noDebts15' : 'noDebts30').classList.remove('hidden');
+                    } else {
+                        document.getElementById(key === '15' ? 'noDebts15' : 'noDebts30').classList.add('hidden');
+                        groups[key].forEach((debt, index) => {
+                            const dueClass = getDueColor(debt.dueDate);
+                            let dueDateCellClass = '';
+                            const today = new Date();
+                            today.setHours(0,0,0,0);
+                            const dueD = new Date(debt.dueDate);
+                            dueD.setHours(0,0,0,0);
+                            const diff = (dueD - today) / (1000 * 60 * 60 * 24);
+                            if (diff === 0) {
+                                dueDateCellClass = 'bg-red-500 text-white font-bold';
+                            } else if (diff > 0 && diff <= 3) {
+                                dueDateCellClass = 'bg-yellow-300 text-gray-900 font-bold';
+                            }
+                            const row = document.createElement('tr');
+                            row.className = `hover:bg-gray-50 dark:hover:bg-gray-700 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700'} ${dueClass}`;
+                            row.innerHTML = `
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.lender}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${formatDate(debt.borrowDate)}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap font-medium ${dueDateCellClass}">${formatDate(debt.dueDate)}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.amountBorrowed}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.monthlyInterest}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.term}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.remainingMonths}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.monthlyPayment}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.totalRemaining}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${debt.remarks || ''}</td>
+                                <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">
+                                    <button class="bg-secondary text-white px-3 py-1 rounded-lg mark-paid hover:bg-green-600 transition-colors" data-id="${debt.id}" ${debt.remainingMonths <= 0 ? 'disabled' : ''}>
+                                        Mark Paid
+                                    </button>
+                                    <button class="bg-danger text-white px-3 py-1 rounded-lg ml-2 delete-debt hover:bg-red-600 transition-colors" data-id="${debt.id}">
+                                        Delete
+                                    </button>
+                                    <button class="bg-primary text-white px-3 py-1 rounded-lg ml-2 edit-debt hover:bg-blue-600 transition-colors" data-id="${debt.id}">
+                                        Edit
+                                    </button>
+                                    ${lastPaidState && lastPaidState.id == debt.id ? '<button class="bg-yellow-500 text-white px-3 py-1 rounded-lg ml-2 undo-paid hover:bg-yellow-600 transition-colors" data-id="' + debt.id + '">Undo</button>' : ''}
+                                </td>
+                            `;
+                            tableBody.appendChild(row);
+                        });
+                    }
+
+                    const totalRemaining = groups[key].reduce((sum, debt) => sum + parseFloat(debt.totalRemaining), 0).toFixed(2);
+                    const totalMonthlyPayment = groups[key].reduce((sum, debt) => sum + parseFloat(debt.monthlyPayment), 0).toFixed(2);
+                    document.getElementById(`totalRemaining${key}`).textContent = totalRemaining;
+                    document.getElementById(`totalMonthlyPayment${key}`).textContent = totalMonthlyPayment;
+                });
+
+                const overallTotal = filteredDebts.reduce((sum, debt) => sum + parseFloat(debt.totalRemaining), 0).toFixed(2);
+                document.getElementById('overallTotalRemaining').textContent = overallTotal;
+
+                updateDashboard();
+                document.querySelectorAll('.mark-paid').forEach(btn => btn.addEventListener('click', handleMarkPaid));
+                document.querySelectorAll('.delete-debt').forEach(btn => btn.addEventListener('click', handleDeleteDebt));
+                document.querySelectorAll('.edit-debt').forEach(btn => btn.addEventListener('click', handleEditDebt));
+                document.querySelectorAll('.undo-paid').forEach(btn => btn.addEventListener('click', handleUndoPaid));
+            }
+
+            function handleMarkPaid(e) {
+                const id = e.target.dataset.id;
+                const debt = debts.find(d => d.id == id);
+                if (debt.remainingMonths <= 0) {
+                    showToast('This debt is already paid off.');
+                    return;
+                }
+
+                lastPaidState = {
+                    id: debt.id,
+                    remainingMonths: debt.remainingMonths,
+                    totalRemaining: debt.totalRemaining,
+                    dueDate: debt.dueDate
+                };
+
+                debt.remainingMonths--;
+                debt.totalRemaining = (debt.remainingMonths * parseFloat(debt.monthlyPayment)).toFixed(2);
+
+                const current = new Date(debt.dueDate);
+                const nextYear = current.getFullYear();
+                const nextMonthIndex = current.getMonth() + 1;
+                const daysInNextMonth = new Date(nextYear, nextMonthIndex + 1, 0).getDate();
+                const nextDay = Math.min(parseInt(debt.paymentDay), daysInNextMonth);
+                const nextDue = new Date(nextYear, nextMonthIndex, nextDay);
+                debt.dueDate = nextDue.toISOString().split('T')[0];
+
+                localStorage.setItem('debts', JSON.stringify(debts));
+                updateTables(document.getElementById('searchInput').value);
+                showToast('Marked as paid. You can undo for 10 seconds.');
+                if (undoTimeout) clearTimeout(undoTimeout);
+                undoTimeout = setTimeout(() => {
+                    lastPaidState = null;
+                    updateTables(document.getElementById('searchInput').value);
+                }, 10000);
+            }
+
+            function handleUndoPaid(e) {
+                const id = e.target.dataset.id;
+                if (!lastPaidState || lastPaidState.id != id) {
+                    showToast('Undo not available.');
+                    return;
+                }
+                const debt = debts.find(d => d.id == id);
+                debt.remainingMonths = lastPaidState.remainingMonths;
+                debt.totalRemaining = lastPaidState.totalRemaining;
+                debt.dueDate = lastPaidState.dueDate;
+                lastPaidState = null;
+                clearTimeout(undoTimeout);
+                localStorage.setItem('debts', JSON.stringify(debts));
+                updateTables(document.getElementById('searchInput').value);
+                showToast('Payment undone.');
+            }
+
+            function handleDeleteDebt(e) {
+                const id = e.target.dataset.id;
+                if (confirm('Are you sure you want to delete this debt?')) {
+                    debts = debts.filter(debt => debt.id != id);
+                    lastPaidState = null;
+                    localStorage.setItem('debts', JSON.stringify(debts));
+                    updateTables(document.getElementById('searchInput').value);
+                    showToast('Debt deleted.');
+                }
+            }
+
+            function handleEditDebt(e) {
+                const id = e.target.dataset.id;
+                const debt = debts.find(d => d.id == id);
+                document.getElementById('editId').value = debt.id;
+                document.getElementById('editLender').value = debt.lender;
+                document.getElementById('editBorrowDate').value = debt.borrowDate;
+                document.getElementById('editDueDate').value = debt.dueDate;
+                document.getElementById('editAmountBorrowed').value = debt.amountBorrowed;
+                document.getElementById('editTerm').value = debt.term;
+                document.getElementById('editMonthlyPayment').value = debt.monthlyPayment;
+                document.getElementById('editPaymentDay').value = debt.paymentDay;
+                document.getElementById('editRemarks').value = debt.remarks || '';
+                document.getElementById('editModal').classList.remove('hidden');
+            }
+
+            document.getElementById('editForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const id = parseInt(document.getElementById('editId').value);
+                const term = parseInt(document.getElementById('editTerm').value);
+                const amountBorrowed = parseFloat(document.getElementById('editAmountBorrowed').value);
+                const monthlyPayment = parseFloat(document.getElementById('editMonthlyPayment').value);
+                const borrowDate = document.getElementById('editBorrowDate').value;
+                const paymentDay = document.getElementById('editPaymentDay').value;
+                const today = new Date();
+                const monthsPassed = calculateMonthsBetween(borrowDate, today, paymentDay);
+                const remainingMonths = Math.max(0, term - monthsPassed);
+                const monthlyInterest = calculateMonthlyInterest(amountBorrowed, monthlyPayment, term);
+                const debt = debts.find(d => d.id == id);
+                debt.lender = document.getElementById('editLender').value;
+                debt.borrowDate = borrowDate;
+                debt.dueDate = document.getElementById('editDueDate').value;
+                debt.amountBorrowed = amountBorrowed.toFixed(2);
+                debt.monthlyInterest = monthlyInterest;
+                debt.term = term;
+                debt.remainingMonths = remainingMonths;
+                debt.monthlyPayment = monthlyPayment.toFixed(2);
+                debt.paymentDay = paymentDay;
+                debt.totalRemaining = (remainingMonths * monthlyPayment).toFixed(2);
+                debt.remarks = document.getElementById('editRemarks').value;
+                lastPaidState = null;
+                localStorage.setItem('debts', JSON.stringify(debts));
+                document.getElementById('editModal').classList.add('hidden');
+                updateTables(document.getElementById('searchInput').value);
+                showToast('Debt updated.');
+            });
+
+            document.getElementById('cancelEdit').addEventListener('click', () => {
+                document.getElementById('editModal').classList.add('hidden');
+            });
+
+            document.getElementById('debtForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const term = parseInt(document.getElementById('term').value);
+                const amountBorrowed = parseFloat(document.getElementById('amountBorrowed').value);
+                const monthlyPayment = parseFloat(document.getElementById('monthlyPayment').value);
+                const borrowDate = document.getElementById('borrowDate').value;
+                const paymentDay = document.getElementById('paymentDay').value;
+                const today = new Date();
+                const monthsPassed = calculateMonthsBetween(borrowDate, today, paymentDay);
+                const remainingMonths = Math.max(0, term - monthsPassed);
+                const monthlyInterest = calculateMonthlyInterest(amountBorrowed, monthlyPayment, term);
+                const debt = {
+                    id: Date.now(),
+                    lender: document.getElementById('lender').value,
+                    borrowDate: borrowDate,
+                    dueDate: document.getElementById('dueDate').value,
+                    amountBorrowed: amountBorrowed.toFixed(2),
+                    monthlyInterest: monthlyInterest,
+                    term: term,
+                    remainingMonths: remainingMonths,
+                    monthlyPayment: monthlyPayment.toFixed(2),
+                    paymentDay: paymentDay,
+                    totalRemaining: (remainingMonths * monthlyPayment).toFixed(2),
+                    remarks: document.getElementById('remarks').value
+                };
+                debts.push(debt);
+                lastPaidState = null;
+                localStorage.setItem('debts', JSON.stringify(debts));
+                updateTables(document.getElementById('searchInput').value);
+                showToast('Debt added.');
+                e.target.reset();
+            });
+
+            document.getElementById('exportData').addEventListener('click', () => {
+                const dataStr = JSON.stringify(debts, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'debts.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('Debts exported.');
+            });
+
+            document.getElementById('importData').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const importedData = JSON.parse(event.target.result);
+                        if (!Array.isArray(importedData)) {
+                            showToast('Invalid JSON file: Must be an array of debt objects.');
+                            return;
+                        }
+
+                        const requiredFields = ['id', 'lender', 'borrowDate', 'dueDate', 'amountBorrowed', 'monthlyInterest', 'term', 'remainingMonths', 'monthlyPayment', 'paymentDay', 'totalRemaining'];
+                        const isValid = importedData.every(debt => {
+                            return requiredFields.every(field => debt.hasOwnProperty(field)) &&
+                                   typeof debt.id === 'number' &&
+                                   typeof debt.lender === 'string' &&
+                                   typeof debt.borrowDate === 'string' &&
+                                   typeof debt.dueDate === 'string' &&
+                                   typeof debt.amountBorrowed === 'string' &&
+                                   typeof debt.monthlyInterest === 'string' &&
+                                   typeof debt.term === 'number' &&
+                                   typeof debt.remainingMonths === 'number' &&
+                                   typeof debt.monthlyPayment === 'string' &&
+                                   ['15', '30'].includes(debt.paymentDay) &&
+                                   typeof debt.totalRemaining === 'string' &&
+                                   (debt.remarks === undefined || typeof debt.remarks === 'string');
+                        });
+
+                        if (!isValid) {
+                            showToast('Invalid JSON file: All debts must have required fields with correct types.');
+                            return;
+                        }
+
+                        debts = importedData;
+                        localStorage.setItem('debts', JSON.stringify(debts));
+                        updateTables(document.getElementById('searchInput').value);
+                        showToast('Debts imported successfully!');
+                        e.target.value = '';
+                    } catch (error) {
+                        showToast('Error reading JSON file: ' + error.message);
+                    }
+                };
+                reader.onerror = () => {
+                    showToast('Error reading file.');
+                };
+                reader.readAsText(file);
+            });
+
+            const openDriveLinkModalBtn = document.getElementById('openDriveLinkModal');
+            if (openDriveLinkModalBtn) {
+                openDriveLinkModalBtn.addEventListener('click', () => {
+                    console.log('Load from Google Drive button clicked');
+                    const modal = document.getElementById('driveLinkModal');
+                    if (modal) {
+                        console.log('Opening modal');
+                        modal.classList.remove('hidden');
+                        document.getElementById('driveLinkInput').focus();
+                    } else {
+                        console.error('Modal element not found');
+                        showToast('Error: Modal not found. Please check the HTML.');
+                    }
+                });
+            } else {
+                console.error('Button #openDriveLinkModal not found');
+                showToast('Error: Button not found. Please check the HTML.');
+            }
+
+            document.getElementById('cancelDriveLink').addEventListener('click', () => {
+                console.log('Cancel button clicked');
+                document.getElementById('driveLinkModal').classList.add('hidden');
+                document.getElementById('driveLinkForm').reset();
+            });
+
+            document.getElementById('driveLinkForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                console.log('Drive link form submitted');
+                const link = document.getElementById('driveLinkInput').value.trim();
+                if (!link) {
+                    showToast('Please paste a Google Drive sharing link or GitHub URL.');
+                    return;
+                }
+
+                let fetchUrl;
+                if (link.includes('github.com') && link.includes('/blob/')) {
+                    // Convert GitHub blob URL to raw
+                    fetchUrl = link.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+                    console.log('Converted GitHub blob to raw URL:', fetchUrl);
+                } else if (link.includes('raw.githubusercontent.com')) {
+                    console.log('Detected GitHub raw URL:', link);
+                    fetchUrl = link;
+                } else if (link.includes('drive.google.com')) {
+                    console.log('Detected Google Drive URL:', link);
+                    const match = link.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                    if (!match || !match[1]) {
+                        showToast('Invalid Google Drive link. It should look like https://drive.google.com/file/d/FILE_ID/view');
+                        return;
+                    }
+                    const fileId = match[1];
+                    fetchUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+                } else {
+                    showToast('Unsupported URL. Use a Google Drive sharing link or GitHub (raw or blob) URL.');
+                    return;
+                }
+
+                const loadingSpinner = document.getElementById('loadingSpinner');
+                loadingSpinner.style.display = 'block';
+
+                try {
+                    console.log('Fetching from:', fetchUrl);
+                    let response = await fetch(fetchUrl);
+                    if (!response.ok) {
+                        console.log('Direct fetch failed, trying CORS proxy');
+                        const proxyUrl = `https://cors-anywhere.herokuapp.com/${fetchUrl}`;
+                        response = await fetch(proxyUrl);
+                    }
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: Failed to fetch JSON. Ensure the file is publicly accessible and try activating the CORS proxy at https://cors-anywhere.herokuapp.com/`);
+                    }
+                    const importedData = await response.json();
+
+                    const requiredFields = ['id', 'lender', 'borrowDate', 'dueDate', 'amountBorrowed', 'monthlyInterest', 'term', 'remainingMonths', 'monthlyPayment', 'paymentDay', 'totalRemaining'];
+                    const isValid = Array.isArray(importedData) && importedData.every(debt => {
+                        return requiredFields.every(field => debt.hasOwnProperty(field)) &&
+                               typeof debt.id === 'number' &&
+                               typeof debt.lender === 'string' &&
+                               typeof debt.borrowDate === 'string' &&
+                               typeof debt.dueDate === 'string' &&
+                               typeof debt.amountBorrowed === 'string' &&
+                               typeof debt.monthlyInterest === 'string' &&
+                               typeof debt.term === 'number' &&
+                               typeof debt.remainingMonths === 'number' &&
+                               typeof debt.monthlyPayment === 'string' &&
+                               ['15', '30'].includes(debt.paymentDay) &&
+                               typeof debt.totalRemaining === 'string' &&
+                               (debt.remarks === undefined || typeof debt.remarks === 'string');
+                    });
+
+                    if (!isValid) {
+                        showToast('Invalid JSON: Must be an array of debt objects with correct fields.');
+                        return;
+                    }
+
+                    debts = importedData;
+                    localStorage.setItem('debts', JSON.stringify(debts));
+                    updateTables(document.getElementById('searchInput').value);
+                    showToast('Debts loaded successfully!');
+                    document.getElementById('driveLinkModal').classList.add('hidden');
+                    document.getElementById('driveLinkForm').reset();
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    showToast(`Error loading data: ${error.message}. Check console for details.`);
+                } finally {
+                    loadingSpinner.style.display = 'none';
+                }
+            });
+
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                updateTables(e.target.value);
+            });
+
+            document.getElementById('resetAllDebts').addEventListener('click', () => {
+                if (debts.length === 0) {
+                    showToast('No debts to reset.');
+                    return;
+                }
+                if (confirm('Are you sure you want to delete ALL debts? This cannot be undone.')) {
+                    debts = [];
+                    lastPaidState = null;
+                    localStorage.setItem('debts', JSON.stringify(debts));
+                    updateTables(document.getElementById('searchInput').value);
+                    showToast('All debts reset.');
+                }
+            });
+
+            document.getElementById('lenderFilter').addEventListener('change', () => {
+                updateTables(document.getElementById('searchInput').value);
+            });
+
+            function trapFocus(modal) {
+                const focusable = modal.querySelectorAll('input, button, select, textarea, [tabindex]:not([tabindex="-1"])');
+                if (!focusable.length) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                modal.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab') {
+                        if (e.shiftKey) {
+                            if (document.activeElement === first) {
+                                e.preventDefault();
+                                last.focus();
+                            }
+                        } else {
+                            if (document.activeElement === last) {
+                                e.preventDefault();
+                                first.focus();
+                            }
+                        }
+                    }
+                });
+            }
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    if (!document.getElementById('editModal').classList.contains('hidden')) {
+                        document.getElementById('editModal').classList.add('hidden');
+                    }
+                    if (!document.getElementById('calculatorModal').classList.contains('hidden')) {
+                        document.getElementById('calculatorModal').classList.add('hidden');
+                    }
+                    if (!document.getElementById('driveLinkModal').classList.contains('hidden')) {
+                        document.getElementById('driveLinkModal').classList.add('hidden');
+                    }
+                }
+            });
+
+            trapFocus(document.getElementById('editModal'));
+            trapFocus(document.getElementById('calculatorModal'));
+            trapFocus(document.getElementById('driveLinkModal'));
+
+            let calcExpression = '';
+            let calcResult = null;
+
+            document.getElementById('openCalculator').addEventListener('click', () => {
+                document.getElementById('calculatorModal').classList.remove('hidden');
+            });
+
+            document.getElementById('closeCalculator').addEventListener('click', () => {
+                document.getElementById('calculatorModal').classList.add('hidden');
+                calcExpression = '';
+                calcResult = null;
+                document.getElementById('calculatorDisplay').value = '';
+            });
+
+            document.querySelectorAll('.calc-btn').forEach(button => {
+                button.addEventListener('click', () => {
+                    const value = button.getAttribute('data-value');
+                    const display = document.getElementById('calculatorDisplay');
+
+                    if (value === 'clear') {
+                        calcExpression = '';
+                        calcResult = null;
+                        display.value = '';
+                    } else if (value === 'del') {
+                        calcExpression = calcExpression.slice(0, -1);
+                        display.value = calcExpression || '';
+                    } else if (value === '=') {
+                        try {
+                            calcResult = eval(calcExpression.replace('×', '*').replace('÷', '/'));
+                            display.value = calcResult.toFixed(2);
+                            calcExpression = calcResult.toString();
+                        } catch (e) {
+                            display.value = 'Error';
+                            calcExpression = '';
+                        }
+                    } else {
+                        calcExpression += value;
+                        display.value = calcExpression;
+                    }
+                });
+            });
+
+            const calculatorModal = document.getElementById('calculatorModal');
+            const calculatorHeader = document.getElementById('calculatorHeader');
+            let isDragging = false;
+            let currentX;
+            let currentY;
+            let xOffset = 0;
+            let yOffset = 0;
+
+            calculatorHeader.addEventListener('mousedown', (e) => {
+                xOffset = e.clientX - currentX;
+                yOffset = e.clientY - currentY;
+                isDragging = true;
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    e.preventDefault();
+                    currentX = e.clientX - xOffset;
+                    currentY = e.clientY - yOffset;
+                    calculatorModal.style.left = currentX + 'px';
+                    calculatorModal.style.top = currentY + 'px';
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            calculatorModal.style.position = 'fixed';
+            calculatorModal.style.left = '50px';
+            calculatorModal.style.top = '50px';
+            currentX = 50;
+            currentY = 50;
+
+            const darkBtn = document.getElementById('toggleDark');
+            const darkIcon = document.getElementById('darkIcon');
+            function setDarkMode(isDark) {
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                    localStorage.setItem('darkMode', '1');
+                    darkIcon.textContent = '☀️';
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    localStorage.setItem('darkMode', '0');
+                    darkIcon.textContent = '🌙';
+                }
+            }
+            darkBtn.addEventListener('click', () => {
+                setDarkMode(!document.documentElement.classList.contains('dark'));
+            });
+            setDarkMode(localStorage.getItem('darkMode') === '1');
+
+            updateTables();
+        });
+    </script>
+</body>
+</html>
