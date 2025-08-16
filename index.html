@@ -14,6 +14,7 @@
               primary: '#3B82F6',
               secondary: '#10B981',
               danger: '#EF4444',
+              warning: '#F59E0B',
             }
           }
         }
@@ -56,7 +57,7 @@
       }
       #debtFormContent {
         transition: max-height 300ms ease-in-out, opacity 300ms ease-in-out;
-        max-height: 1000px; /* Adjust based on max form height */
+        max-height: 1000px;
         overflow: hidden;
       }
       #debtFormContent.hidden {
@@ -69,7 +70,6 @@
         right: 20px;
         z-index: 1000;
       }
-      /* Hide Remarks column on mobile */
       @media (max-width: 640px) {
         .hide-on-mobile {
           display: none;
@@ -79,7 +79,6 @@
           -webkit-overflow-scrolling: touch;
         }
       }
-      /* Tooltip styling */
       .tooltip {
         position: relative;
       }
@@ -96,7 +95,6 @@
         white-space: nowrap;
         z-index: 10;
       }
-      /* Toast with icons */
       .toast-success::before {
         content: '✔';
         margin-right: 8px;
@@ -104,6 +102,14 @@
       .toast-error::before {
         content: '⚠';
         margin-right: 8px;
+      }
+      .hidden-debt {
+        background-color: #e5e7eb !important;
+        opacity: 0.6;
+      }
+      .dark .hidden-debt {
+        background-color: #4b5563 !important;
+        opacity: 0.6;
       }
     </style>
 </head>
@@ -319,6 +325,10 @@
                     <select id="lenderFilter" class="p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary dark:bg-gray-800 dark:text-gray-100">
                         <option value="">All</option>
                     </select>
+                    <label for="showHidden" class="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                        <input type="checkbox" id="showHidden" class="h-4 w-4 text-primary focus:ring-primary border-gray-300 dark:border-gray-600 rounded">
+                        Show Hidden Debts
+                    </label>
                 </div>
             </div>
             
@@ -488,10 +498,11 @@
             }
 
             function updateDashboard() {
-                document.getElementById('dashboardTotalDebts').textContent = debts.length;
-                const totalMonthly = debts.reduce((sum, d) => sum + parseFloat(d.monthlyPayment), 0);
+                const visibleDebts = debts.filter(d => !d.hidden);
+                document.getElementById('dashboardTotalDebts').textContent = visibleDebts.length;
+                const totalMonthly = visibleDebts.reduce((sum, d) => sum + parseFloat(d.monthlyPayment), 0);
                 document.getElementById('dashboardTotalMonthly').textContent = `₱${pesoFormatter.format(totalMonthly)}`;
-                const overall = debts.reduce((sum, d) => sum + parseFloat(d.totalRemaining), 0);
+                const overall = visibleDebts.reduce((sum, d) => sum + parseFloat(d.totalRemaining), 0);
                 document.getElementById('dashboardOverallRemaining').textContent = `₱${pesoFormatter.format(overall)}`;
             }
 
@@ -502,6 +513,10 @@
                 table30.innerHTML = '';
 
                 let filteredDebts = debts;
+                const showHidden = document.getElementById('showHidden').checked;
+                if (!showHidden) {
+                    filteredDebts = debts.filter(debt => !debt.hidden);
+                }
                 if (filter) {
                     filteredDebts = filteredDebts.filter(debt => debt.lender.toLowerCase().includes(filter.toLowerCase()));
                 }
@@ -529,14 +544,11 @@
                     } else {
                         document.getElementById(key === '15' ? 'noDebts15' : 'noDebts30').classList.add('hidden');
                         groups[key].forEach((debt, index) => {
-                            // Calculate days until due date
                             const today = new Date();
                             today.setHours(0,0,0,0);
                             const dueD = new Date(debt.dueDate);
                             dueD.setHours(0,0,0,0);
                             const diff = Math.round((dueD - today) / (1000 * 60 * 60 * 24));
-
-                            // Set cell color: red on due date, yellow for 1-3 days before
                             let dueDateCellClass = '';
                             let dueTooltip = '';
                             if (diff === 0) {
@@ -551,7 +563,7 @@
                             }
 
                             const row = document.createElement('tr');
-                            row.className = `hover:bg-gray-100 dark:hover:bg-gray-600 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700'}`;
+                            row.className = `hover:bg-gray-100 dark:hover:bg-gray-600 ${index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700'} ${debt.hidden ? 'hidden-debt' : ''}`;
                             row.innerHTML = `
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 text-center whitespace-nowrap">${debt.lender}</td>
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 text-center whitespace-nowrap">${debt.term}</td>
@@ -564,15 +576,10 @@
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 text-center whitespace-nowrap">₱${pesoFormatter.format(parseFloat(debt.totalRemaining))}</td>
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 text-center whitespace-nowrap hide-on-mobile">${debt.remarks || ''}</td>
                                 <td class="p-3 border border-gray-200 dark:border-gray-700 whitespace-nowrap">
-                                    <button class="bg-secondary text-white px-3 py-1 rounded-lg mark-paid hover:bg-green-600 transition-colors" data-id="${debt.id}" ${debt.remainingMonths <= 0 ? 'disabled' : ''} aria-label="Mark debt as paid">
-                                        Mark Paid
-                                    </button>
-                                    <button class="bg-danger text-white px-3 py-1 rounded-lg ml-2 delete-debt hover:bg-red-600 transition-colors" data-id="${debt.id}" aria-label="Delete debt">
-                                        Delete
-                                    </button>
-                                    <button class="bg-primary text-white px-3 py-1 rounded-lg ml-2 edit-debt hover:bg-blue-600 transition-colors" data-id="${debt.id}" aria-label="Edit debt">
-                                        Edit
-                                    </button>
+                                    <button class="bg-secondary text-white px-3 py-1 rounded-lg mark-paid hover:bg-green-600 transition-colors" data-id="${debt.id}" ${debt.remainingMonths <= 0 ? 'disabled' : ''} aria-label="Mark debt as paid">Mark Paid</button>
+                                    <button class="bg-danger text-white px-3 py-1 rounded-lg ml-2 delete-debt hover:bg-red-600 transition-colors" data-id="${debt.id}" aria-label="Delete debt">Delete</button>
+                                    <button class="bg-primary text-white px-3 py-1 rounded-lg ml-2 edit-debt hover:bg-blue-600 transition-colors" data-id="${debt.id}" aria-label="Edit debt">Edit</button>
+                                    <button class="bg-warning text-white px-3 py-1 rounded-lg ml-2 toggle-hide-debt hover:bg-yellow-600 transition-colors" data-id="${debt.id}" aria-label="${debt.hidden ? 'Unhide debt' : 'Hide debt'}">${debt.hidden ? 'Unhide' : 'Hide'}</button>
                                     ${lastPaidState && lastPaidState.id == debt.id ? '<button class="bg-yellow-500 text-white px-3 py-1 rounded-lg ml-2 undo-paid hover:bg-yellow-600 transition-colors" data-id="' + debt.id + '" aria-label="Undo last payment">Undo</button>' : ''}
                                 </td>
                             `;
@@ -580,13 +587,15 @@
                         });
                     }
 
-                    const totalRemaining = groups[key].reduce((sum, debt) => sum + parseFloat(debt.totalRemaining), 0);
-                    const totalMonthlyPayment = groups[key].reduce((sum, debt) => sum + parseFloat(debt.monthlyPayment), 0);
+                    const visibleGroupDebts = groups[key].filter(debt => !debt.hidden);
+                    const totalRemaining = visibleGroupDebts.reduce((sum, debt) => sum + parseFloat(debt.totalRemaining), 0);
+                    const totalMonthlyPayment = visibleGroupDebts.reduce((sum, debt) => sum + parseFloat(debt.monthlyPayment), 0);
                     document.getElementById(`totalRemaining${key}`).textContent = `₱${pesoFormatter.format(totalRemaining)}`;
                     document.getElementById(`totalMonthlyPayment${key}`).textContent = `₱${pesoFormatter.format(totalMonthlyPayment)}`;
                 });
 
-                const overallTotal = filteredDebts.reduce((sum, debt) => sum + parseFloat(debt.totalRemaining), 0);
+                const visibleDebts = filteredDebts.filter(debt => !debt.hidden);
+                const overallTotal = visibleDebts.reduce((sum, debt) => sum + parseFloat(debt.totalRemaining), 0);
                 document.getElementById('overallTotalRemaining').textContent = `₱${pesoFormatter.format(overallTotal)}`;
 
                 updateDashboard();
@@ -594,6 +603,7 @@
                 document.querySelectorAll('.delete-debt').forEach(btn => btn.addEventListener('click', handleDeleteDebt));
                 document.querySelectorAll('.edit-debt').forEach(btn => btn.addEventListener('click', handleEditDebt));
                 document.querySelectorAll('.undo-paid').forEach(btn => btn.addEventListener('click', handleUndoPaid));
+                document.querySelectorAll('.toggle-hide-debt').forEach(btn => btn.addEventListener('click', handleToggleHideDebt));
             }
 
             function handleMarkPaid(e) {
@@ -634,7 +644,7 @@
                         lastPaidState = null;
                         updateTables(document.getElementById('searchInput').value);
                     }, 10000);
-                }, 500); // Simulate processing delay
+                }, 500);
             }
 
             function handleUndoPaid(e) {
@@ -670,6 +680,19 @@
                         updateTables(document.getElementById('searchInput').value);
                         showToast('Debt deleted.');
                     }
+                    hideLoading();
+                }, 500);
+            }
+
+            function handleToggleHideDebt(e) {
+                showLoading();
+                setTimeout(() => {
+                    const id = e.target.dataset.id;
+                    const debt = debts.find(d => d.id == id);
+                    debt.hidden = !debt.hidden;
+                    localStorage.setItem('debts', JSON.stringify(debts));
+                    updateTables(document.getElementById('searchInput').value);
+                    showToast(debt.hidden ? 'Debt hidden.' : 'Debt unhidden.');
                     hideLoading();
                 }, 500);
             }
@@ -754,7 +777,8 @@
                         monthlyPayment: monthlyPayment.toFixed(2),
                         paymentDay: paymentDay,
                         totalRemaining: (remainingMonths * monthlyPayment).toFixed(2),
-                        remarks: document.getElementById('remarks').value
+                        remarks: document.getElementById('remarks').value,
+                        hidden: false
                     };
                     debts.push(debt);
                     lastPaidState = null;
@@ -812,7 +836,8 @@
                                    typeof debt.monthlyPayment === 'string' &&
                                    ['15', '30'].includes(debt.paymentDay) &&
                                    typeof debt.totalRemaining === 'string' &&
-                                   (debt.remarks === undefined || typeof debt.remarks === 'string');
+                                   (debt.remarks === undefined || typeof debt.remarks === 'string') &&
+                                   (debt.hidden === undefined || typeof debt.hidden === 'boolean');
                         });
 
                         if (!isValid) {
@@ -821,7 +846,7 @@
                             return;
                         }
 
-                        debts = importedData;
+                        debts = importedData.map(debt => ({ ...debt, hidden: debt.hidden ?? false }));
                         localStorage.setItem('debts', JSON.stringify(debts));
                         updateTables(document.getElementById('searchInput').value);
                         showToast('Debts imported successfully!');
@@ -901,7 +926,8 @@
                                typeof debt.monthlyPayment === 'string' &&
                                ['15', '30'].includes(debt.paymentDay) &&
                                typeof debt.totalRemaining === 'string' &&
-                               (debt.remarks === undefined || typeof debt.remarks === 'string');
+                               (debt.remarks === undefined || typeof debt.remarks === 'string') &&
+                               (debt.hidden === undefined || typeof debt.hidden === 'boolean');
                     });
 
                     if (!isValid) {
@@ -910,7 +936,7 @@
                         return;
                     }
 
-                    debts = importedData;
+                    debts = importedData.map(debt => ({ ...debt, hidden: debt.hidden ?? false }));
                     localStorage.setItem('debts', JSON.stringify(debts));
                     updateTables(document.getElementById('searchInput').value);
                     showToast('Debts loaded successfully!');
@@ -925,6 +951,10 @@
 
             document.getElementById('searchInput').addEventListener('input', (e) => {
                 updateTables(e.target.value);
+            });
+
+            document.getElementById('showHidden').addEventListener('change', () => {
+                updateTables(document.getElementById('searchInput').value);
             });
 
             document.getElementById('resetAllDebts').addEventListener('click', () => {
@@ -1036,8 +1066,6 @@
             const calculatorHeader = document.getElementById('calculatorHeader');
             let isDragging = false;
             let currentX;
-            let currentY;
-            let xOffset = 0;
             let yOffset = 0;
 
             calculatorHeader.addEventListener('mousedown', (e) => {
